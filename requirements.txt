@@ -1,5 +1,0 @@
-fastapi
-uvicorn
-asteval
-pytest
-httpx
