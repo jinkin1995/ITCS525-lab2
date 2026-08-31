@@ -127,6 +127,15 @@ def test_history_stores_calculator_log_objects():
     assert history[0].result == 42
 
 
+def test_history_keeps_integer_results_as_integers():
+    """An integer result is not turned into a float on the way out."""
+    calculated = client.post("/calculate", json={"expr": "1+1"}).json()["result"]
+    stored = client.get("/history").json()["items"][0]["result"]
+
+    assert calculated == stored == 2
+    assert isinstance(stored, int)
+
+
 def test_history_limit_returns_only_n_items():
     """The limit query parameter caps how many entries are returned."""
     for i in range(5):

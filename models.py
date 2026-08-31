@@ -20,4 +20,17 @@ class CalculatorLog(BaseModel):
 
     timestamp: str = Field(..., description="When the calculation was made.")
     expr: str = Field(..., description="The expression the user submitted.")
-    result: float = Field(..., description="The value the expression evaluated to.")
+    result: float | int = Field(
+        ..., description="The value the expression evaluated to."
+    )
+
+
+class HistoryResponse(BaseModel):
+    """Body of the GET /history API."""
+
+    ok: bool = True
+    count: int = Field(..., description="How many entries are in this response.")
+    total: int = Field(..., description="How many entries the history holds overall.")
+    items: list[CalculatorLog] = Field(
+        default_factory=list, description="The history entries, newest first."
+    )

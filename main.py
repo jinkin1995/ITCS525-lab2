@@ -5,7 +5,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from asteval import Interpreter
 
-from models import CalculatorLog, Expression
+from models import CalculatorLog, Expression, HistoryResponse
 
 HISTORY_MAX = 1000
 # HISTORY (in-memory for now)
@@ -48,7 +48,7 @@ def calculate(expression: Expression):
 @app.get("/history")
 def get_history(
     limit: int | None = Query(default=None, ge=1, le=HISTORY_MAX),
-) -> dict:
+) -> HistoryResponse:
     """Return the calculation history, newest first.
 
     `limit` is optional; when given it caps how many entries come back.
@@ -56,7 +56,7 @@ def get_history(
     items: list[CalculatorLog] = list(history)[::-1]  # newest first
     if limit is not None:
         items = items[:limit]
-    return {"ok": True, "count": len(items), "total": len(history), "items": items}
+    return HistoryResponse(count=len(items), total=len(history), items=items)
 
 
 @app.delete("/history")
