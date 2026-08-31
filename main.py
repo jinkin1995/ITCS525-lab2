@@ -5,11 +5,11 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from asteval import Interpreter
 
-from calculator import expand_percent
+from models import CalculatorLog, Expression
 
 HISTORY_MAX = 1000
 # HISTORY (in-memory for now)
-history = deque(maxlen=HISTORY_MAX)
+history: deque[CalculatorLog] = deque(maxlen=HISTORY_MAX)
 
 app = FastAPI(title="Mini Calculator API")
 
@@ -25,32 +25,35 @@ aeval = Interpreter(minimal=True, usersyms={"pi": math.pi, "e": math.e})
 
 
 @app.post("/calculate")
-def calculate(expr: str):
+def calculate(expression: Expression):
+    expr = expression.expr
     try:
-        code = expand_percent(expr)
+        code = expression.expand_percent()
         result = aeval(code)
         if aeval.error:
             msg = "; ".join(str(e.get_error()) for e in aeval.error)
             aeval.error.clear()
             return {"ok": False, "expr": expr, "result": "", "error": msg}
         # Add history (only successful calculations are recorded)
-        history.append({
-            "expr": expr,
-            "result": result,
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-        })
+        history.append(CalculatorLog(
+            timestamp=datetime.now().isoformat(timespec="seconds"),
+            expr=expr,
+            result=result,
+        ))
         return {"ok": True, "expr": expr, "result": result, "error": ""}
     except Exception as e:
         return {"ok": False, "expr": expr, "error": str(e)}
 
 
 @app.get("/history")
-def get_history(limit: int | None = Query(default=None, ge=1, le=HISTORY_MAX)):
+def get_history(
+    limit: int | None = Query(default=None, ge=1, le=HISTORY_MAX),
+) -> dict:
     """Return the calculation history, newest first.
 
     `limit` is optional; when given it caps how many entries come back.
     """
-    items = list(history)[::-1]  # newest first
+    items: list[CalculatorLog] = list(history)[::-1]  # newest first
     if limit is not None:
         items = items[:limit]
     return {"ok": True, "count": len(items), "total": len(history), "items": items}

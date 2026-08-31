@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from main import app, history  # or whatever your app module is
+from models import CalculatorLog, Expression
 
 client = TestClient(app)
 
@@ -16,7 +17,7 @@ def clean_history():
 # ---------- POST /calculate ----------
 
 def test_basic_division():
-    r = client.post("/calculate", params={"expr": "30/4"})
+    r = client.post("/calculate", json={"expr": "30/4"})
     assert r.status_code == 200
     data = r.json()
     assert data["ok"] is True
@@ -24,7 +25,7 @@ def test_basic_division():
 
 
 def test_percent_subtraction():
-    r = client.post("/calculate", params={"expr": "100 - 6%"})
+    r = client.post("/calculate", json={"expr": "100 - 6%"})
     assert r.status_code == 200
     data = r.json()
     assert data["ok"] is True
@@ -32,7 +33,7 @@ def test_percent_subtraction():
 
 
 def test_standalone_percent():
-    r = client.post("/calculate", params={"expr": "6%"})
+    r = client.post("/calculate", json={"expr": "6%"})
     assert r.status_code == 200
     data = r.json()
     assert data["ok"] is True
@@ -40,11 +41,34 @@ def test_standalone_percent():
 
 
 def test_invalid_expr_returns_ok_false():
-    r = client.post("/calculate", params={"expr": "2**(3"})
+    r = client.post("/calculate", json={"expr": "2**(3"})
     assert r.status_code == 200
     data = r.json()
     assert data["ok"] is False
     assert "error" in data and data["error"] != ""
+
+
+def test_calculate_rejects_body_without_expr():
+    """The Expression body requires an expr field, otherwise FastAPI returns 422."""
+    r = client.post("/calculate", json={})
+    assert r.status_code == 422
+
+
+def test_calculate_rejects_plain_query_param():
+    """The old ?expr= query-param form is no longer accepted."""
+    r = client.post("/calculate", params={"expr": "1+1"})
+    assert r.status_code == 422
+
+
+# ---------- Expression model ----------
+
+def test_expression_expand_percent_expands_the_symbol():
+    """The Expression object expands % through its own method."""
+    assert Expression(expr="100 - 6%").expand_percent() == "100 - ((6/100)*100)"
+
+
+def test_expression_expand_percent_leaves_plain_expression_alone():
+    assert Expression(expr="2 + 3 * 4").expand_percent() == "2 + 3 * 4"
 
 
 # ---------- GET /history ----------
@@ -61,9 +85,9 @@ def test_history_is_empty_at_start():
 
 def test_history_records_calculations_newest_first():
     """Each successful calculation is stored, most recent one first."""
-    client.post("/calculate", params={"expr": "1+1"})
-    client.post("/calculate", params={"expr": "2+2"})
-    client.post("/calculate", params={"expr": "3+3"})
+    client.post("/calculate", json={"expr": "1+1"})
+    client.post("/calculate", json={"expr": "2+2"})
+    client.post("/calculate", json={"expr": "3+3"})
 
     r = client.get("/history")
     assert r.status_code == 200
@@ -74,10 +98,39 @@ def test_history_records_calculations_newest_first():
     assert "timestamp" in data["items"][0]
 
 
+def test_history_items_are_calculator_logs():
+    """Every returned entry validates as a CalculatorLog."""
+    client.post("/calculate", json={"expr": "30/4"})
+
+    data = client.get("/history").json()
+    logs = [CalculatorLog(**item) for item in data["items"]]
+    assert len(logs) == 1
+    assert logs[0].expr == "30/4"
+    assert logs[0].result == 7.5
+    assert logs[0].timestamp != ""
+
+
+def test_history_entries_expose_only_the_log_fields():
+    """A history entry carries exactly timestamp, expr and result."""
+    client.post("/calculate", json={"expr": "1+1"})
+
+    item = client.get("/history").json()["items"][0]
+    assert set(item) == {"timestamp", "expr", "result"}
+
+
+def test_history_stores_calculator_log_objects():
+    """The in-memory history holds CalculatorLog objects, not plain dicts."""
+    client.post("/calculate", json={"expr": "7*6"})
+
+    assert len(history) == 1
+    assert isinstance(history[0], CalculatorLog)
+    assert history[0].result == 42
+
+
 def test_history_limit_returns_only_n_items():
     """The limit query parameter caps how many entries are returned."""
     for i in range(5):
-        client.post("/calculate", params={"expr": f"{i}+0"})
+        client.post("/calculate", json={"expr": f"{i}+0"})
 
     r = client.get("/history", params={"limit": 2})
     assert r.status_code == 200
@@ -89,7 +142,7 @@ def test_history_limit_returns_only_n_items():
 
 def test_history_skips_failed_calculations():
     """A calculation that fails must not end up in the history."""
-    client.post("/calculate", params={"expr": "2**(3"})
+    client.post("/calculate", json={"expr": "2**(3"})
 
     r = client.get("/history")
     assert r.status_code == 200
@@ -106,8 +159,8 @@ def test_history_rejects_invalid_limit():
 
 def test_delete_history_clears_entries():
     """Deleting removes everything and reports how many were cleared."""
-    client.post("/calculate", params={"expr": "1+1"})
-    client.post("/calculate", params={"expr": "2+2"})
+    client.post("/calculate", json={"expr": "1+1"})
+    client.post("/calculate", json={"expr": "2+2"})
 
     r = client.delete("/history")
     assert r.status_code == 200
@@ -119,7 +172,7 @@ def test_delete_history_clears_entries():
 
 def test_history_is_empty_after_delete():
     """A GET right after a DELETE returns nothing."""
-    client.post("/calculate", params={"expr": "7*6"})
+    client.post("/calculate", json={"expr": "7*6"})
     client.delete("/history")
 
     r = client.get("/history")
@@ -138,9 +191,9 @@ def test_delete_empty_history_is_ok():
 
 def test_delete_then_calculate_starts_fresh():
     """New calculations after a DELETE build a brand new history."""
-    client.post("/calculate", params={"expr": "1+1"})
+    client.post("/calculate", json={"expr": "1+1"})
     client.delete("/history")
-    client.post("/calculate", params={"expr": "10/2"})
+    client.post("/calculate", json={"expr": "10/2"})
 
     r = client.get("/history")
     data = r.json()
